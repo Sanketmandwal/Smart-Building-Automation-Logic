@@ -246,8 +246,18 @@ export const BuildingProvider = ({ children }) => {
     baselinePower: 0
   });
 
-  // Ref to track if we're updating to prevent race conditions
+  // ✅ Refs to track state and prevent race conditions
   const isUpdatingRef = useRef(false);
+  const automationModeRef = useRef(automationMode);
+  const timeOfDayRef = useRef(timeOfDay);
+  const sunlightIntensityRef = useRef(sunlightIntensity);
+
+  // ✅ Keep refs synced with state
+  useEffect(() => {
+    automationModeRef.current = automationMode;
+    timeOfDayRef.current = timeOfDay;
+    sunlightIntensityRef.current = sunlightIntensity;
+  }, [automationMode, timeOfDay, sunlightIntensity]);
 
   // Calculate room power
   const calculateRoomPower = (room) => {
@@ -321,21 +331,21 @@ export const BuildingProvider = ({ children }) => {
     });
   }, [buildings, isSimulationRunning, simulationStartTime]);
 
-  // ✅ FIXED: Update devices when automation settings change
+  // ✅ EFFECT 1: Immediate update when automation settings change
   useEffect(() => {
     if (!isSimulationRunning) return;
 
     const updateDevices = async () => {
-      if (isUpdatingRef.current) return; // Prevent concurrent updates
+      if (isUpdatingRef.current) return;
       
       isUpdatingRef.current = true;
       setIsLoading(true);
       setApiError(null);
 
+      console.log('🔄 Immediate update triggered. Mode:', automationMode);
+
       try {
-        // Get current building state snapshot
         setBuildings(currentBuildings => {
-          // Prepare all API calls
           const apiCalls = [];
           const roomMap = [];
 
@@ -356,20 +366,17 @@ export const BuildingProvider = ({ children }) => {
             });
           });
 
-          // Execute all API calls
           Promise.all(apiCalls)
             .then(responses => {
               setBuildings(prevBuildings =>
                 prevBuildings.map(building => ({
                   ...building,
                   rooms: building.rooms.map(room => {
-                    // Find the response for this room
                     const roomIndex = roomMap.findIndex(
                       rm => rm.buildingId === building.id && rm.roomId === room.id
                     );
                     
                     if (roomIndex !== -1 && responses[roomIndex]?.success) {
-                      // ✅ CRITICAL: Only update devices, keep occupancy and people!
                       return {
                         ...room,
                         devices: responses[roomIndex].devices
@@ -389,7 +396,6 @@ export const BuildingProvider = ({ children }) => {
               isUpdatingRef.current = false;
             });
 
-          // Return current state immediately
           return currentBuildings;
         });
       } catch (error) {
@@ -400,18 +406,21 @@ export const BuildingProvider = ({ children }) => {
       }
     };
 
-    // Update immediately when settings change
     updateDevices();
   }, [automationMode, timeOfDay, sunlightIntensity, isSimulationRunning]);
 
-  // ✅ FIXED: Periodic refresh (only when simulation is running)
+  // ✅ EFFECT 2: Periodic refresh (uses refs to avoid recreating interval)
   useEffect(() => {
     if (!isSimulationRunning) return;
 
+    console.log('🔄 Starting 5-second periodic refresh');
+
     const interval = setInterval(async () => {
-      if (isUpdatingRef.current) return; // Skip if already updating
+      if (isUpdatingRef.current) return;
       
       isUpdatingRef.current = true;
+
+      console.log('⏰ Periodic update. Current mode:', automationModeRef.current);
 
       setBuildings(currentBuildings => {
         const apiCalls = [];
@@ -421,11 +430,11 @@ export const BuildingProvider = ({ children }) => {
           building.rooms.forEach(room => {
             apiCalls.push(
               ApiService.calculateDeviceSettings({
-                automationMode,
+                automationMode: automationModeRef.current, // ✅ Use ref
                 occupancy: room.occupancy,
                 temperature: room.temperature,
-                timeOfDay,
-                sunlightIntensity,
+                timeOfDay: timeOfDayRef.current, // ✅ Use ref
+                sunlightIntensity: sunlightIntensityRef.current, // ✅ Use ref
                 humidity: room.humidity,
                 roomType: room.type
               })
@@ -463,10 +472,13 @@ export const BuildingProvider = ({ children }) => {
 
         return currentBuildings;
       });
-    }, 5000); // Every 5 seconds
+    }, 5000);
 
-    return () => clearInterval(interval);
-  }, [isSimulationRunning]); // Only recreate interval when simulation starts/stops
+    return () => {
+      console.log('🛑 Stopping periodic refresh');
+      clearInterval(interval);
+    };
+  }, [isSimulationRunning]); // ✅ Only recreates when simulation starts/stops
 
   // Move person
   const movePerson = (buildingId, roomId, personId, toRoom = true) => {
