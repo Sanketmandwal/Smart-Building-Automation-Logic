@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import ApiService from '../services/api';
 
 const SimulationContext = createContext();
 
@@ -11,51 +12,82 @@ export const useSimulation = () => {
 };
 
 export const SimulationProvider = ({ children }) => {
-  // Automation Modes
-  const [automationMode, setAutomationMode] = useState('none'); // 'none', 'rule-based', 'context-aware'
-  
-  // Room State
-  const [occupancy, setOccupancy] = useState(0); // Number of people in room
+  const [automationMode, setAutomationMode] = useState('none');
+  const [occupancy, setOccupancy] = useState(0);
   const [peopleOutside, setPeopleOutside] = useState([
     { id: 1, name: 'Person 1' },
     { id: 2, name: 'Person 2' },
-    { id: 3, name: 'Person 3' }
+    { id: 3, name: 'Person 3' },
+    { id: 4, name: 'Person 4' },
+    { id: 5, name: 'Person 5' },
   ]);
+
   const [peopleInside, setPeopleInside] = useState([]);
-  
-  // Environmental Conditions
-  const [timeOfDay, setTimeOfDay] = useState('day'); // 'day' or 'night'
-  const [sunlightIntensity, setSunlightIntensity] = useState(80); // 0-100
-  const [temperature, setTemperature] = useState(28); // Celsius
-  const [humidity, setHumidity] = useState(60); // Percentage
-  
-  // Device States
+  // Add new state for energy tracking
+  const [totalEnergySaved, setTotalEnergySaved] = useState(0); // in Watt-hours
+  const [simulationStartTime, setSimulationStartTime] = useState(null);
+  const [sessionDuration, setSessionDuration] = useState(0); // in seconds
+  const [timeOfDay, setTimeOfDay] = useState('day');
+  const [sunlightIntensity, setSunlightIntensity] = useState(80);
+  const [temperature, setTemperature] = useState(28);
+  const [humidity, setHumidity] = useState(60);
+
   const [devices, setDevices] = useState({
-    light: {
-      isOn: true,
-      intensity: 100, // 0-100
-      powerConsumption: 60 // Watts
-    },
-    fan: {
-      isOn: true,
-      speed: 3, // 0-3 (off, low, medium, high)
-      powerConsumption: 75
-    },
-    ac: {
-      isOn: true,
-      mode: 'cooling', // 'cooling', 'heating', 'off'
-      temperature: 24,
-      speed: 3, // 0-3
-      powerConsumption: 1500
-    }
+    light: { isOn: true, intensity: 100, powerConsumption: 60 },
+    fan: { isOn: true, speed: 3, powerConsumption: 75 },
+    ac: { isOn: true, mode: 'cooling', temperature: 24, speed: 3, powerConsumption: 1500 }
   });
-  
-  // Power Tracking
+
   const [powerHistory, setPowerHistory] = useState([]);
   const [totalPowerConsumption, setTotalPowerConsumption] = useState(0);
-  
-  // Simulation Control
   const [isSimulationRunning, setIsSimulationRunning] = useState(false);
+  const [backendStatus, setBackendStatus] = useState('checking');
+
+  // Check backend health on mount
+  useEffect(() => {
+    const checkBackend = async () => {
+      const health = await ApiService.checkHealth();
+      setBackendStatus(health.status === 'ok' ? 'connected' : 'disconnected');
+    };
+    checkBackend();
+  }, []);
+
+
+  // Update when simulation starts/stops
+  const toggleAutomation = () => {
+    setIsSimulationRunning(prev => {
+      const newState = !prev;
+      if (newState) {
+        // Starting simulation
+        setSimulationStartTime(Date.now());
+        setTotalEnergySaved(0);
+        setSessionDuration(0);
+      }
+      return newState;
+    });
+  };
+
+  // Calculate energy saved over time
+  useEffect(() => {
+    if (!isSimulationRunning || !simulationStartTime) return;
+
+    const interval = setInterval(() => {
+      const currentDuration = Math.floor((Date.now() - simulationStartTime) / 1000); // seconds
+      setSessionDuration(currentDuration);
+
+      // Calculate energy saved
+      // Energy (Wh) = Power (W) × Time (h)
+      const baselinePower = 1635; // W
+      const currentPower = totalPowerConsumption; // W
+      const powerSaved = baselinePower - currentPower; // W
+      const timeInHours = currentDuration / 3600; // Convert seconds to hours
+      const energySaved = powerSaved * timeInHours; // Wh
+
+      setTotalEnergySaved(energySaved);
+    }, 1000); // Update every second
+
+    return () => clearInterval(interval);
+  }, [isSimulationRunning, simulationStartTime, totalPowerConsumption]);
 
   // Calculate total power consumption
   useEffect(() => {
@@ -63,13 +95,42 @@ export const SimulationProvider = ({ children }) => {
       return sum + (device.isOn ? device.powerConsumption : 0);
     }, 0);
     setTotalPowerConsumption(total);
-    
+
     if (isSimulationRunning) {
-      setPowerHistory(prev => [...prev, { time: Date.now(), power: total, mode: automationMode }]);
+      setPowerHistory(prev => [...prev.slice(-50), {
+        time: Date.now(),
+        power: total,
+        mode: automationMode
+      }]);
     }
   }, [devices, isSimulationRunning, automationMode]);
 
-  // Person Management
+  // MAIN AUTOMATION LOGIC - Call backend when conditions change
+  useEffect(() => {
+    if (!isSimulationRunning) return;
+
+    const updateDevices = async () => {
+      try {
+        const response = await ApiService.calculateDeviceSettings({
+          automationMode,
+          occupancy,
+          temperature,
+          timeOfDay,
+          sunlightIntensity,
+          humidity
+        });
+
+        if (response.success) {
+          setDevices(response.devices);
+        }
+      } catch (error) {
+        console.error('Failed to update devices:', error);
+      }
+    };
+
+    updateDevices();
+  }, [automationMode, occupancy, temperature, timeOfDay, sunlightIntensity, humidity, isSimulationRunning]);
+
   const movePerson = (personId, toRoom = true) => {
     if (toRoom) {
       const person = peopleOutside.find(p => p.id === personId);
@@ -88,7 +149,6 @@ export const SimulationProvider = ({ children }) => {
     }
   };
 
-  // Device Control
   const updateDevice = (deviceName, updates) => {
     setDevices(prev => ({
       ...prev,
@@ -96,19 +156,15 @@ export const SimulationProvider = ({ children }) => {
     }));
   };
 
-  // Toggle Automation
-  const toggleAutomation = () => {
-    setIsSimulationRunning(prev => !prev);
-  };
-
-  // Reset Simulation
   const resetSimulation = () => {
     setOccupancy(0);
     setPeopleInside([]);
     setPeopleOutside([
       { id: 1, name: 'Person 1' },
       { id: 2, name: 'Person 2' },
-      { id: 3, name: 'Person 3' }
+      { id: 3, name: 'Person 3' },
+      { id: 4, name: 'Person 4' },
+      { id: 5, name: 'Person 5' },
     ]);
     setPowerHistory([]);
     setDevices({
@@ -116,33 +172,18 @@ export const SimulationProvider = ({ children }) => {
       fan: { isOn: true, speed: 3, powerConsumption: 75 },
       ac: { isOn: true, mode: 'cooling', temperature: 24, speed: 3, powerConsumption: 1500 }
     });
+    setIsSimulationRunning(false);
   };
 
   const value = {
-    // State
-    automationMode,
-    occupancy,
-    peopleOutside,
-    peopleInside,
-    timeOfDay,
-    sunlightIntensity,
-    temperature,
-    humidity,
-    devices,
-    powerHistory,
-    totalPowerConsumption,
-    isSimulationRunning,
-    
-    // Actions
-    setAutomationMode,
-    movePerson,
-    setTimeOfDay,
-    setSunlightIntensity,
-    setTemperature,
-    setHumidity,
-    updateDevice,
-    toggleAutomation,
-    resetSimulation
+    automationMode, occupancy, peopleOutside, peopleInside,
+    timeOfDay, sunlightIntensity, temperature, humidity,
+    devices, powerHistory, totalPowerConsumption,
+    isSimulationRunning, backendStatus,
+    setAutomationMode, movePerson, setTimeOfDay,
+    setSunlightIntensity, setTemperature, setHumidity,
+    updateDevice, toggleAutomation, resetSimulation,
+    totalEnergySaved, sessionDuration
   };
 
   return (

@@ -107,51 +107,70 @@ const Devices = ({ devices, timeOfDay }) => {
         )}
       </motion.div>
 
-      {/* AC */}
-      <motion.div
-        animate={{
-          opacity: devices.ac.isOn ? 1 : 0.3
-        }}
-        transition={{ duration: 0.5 }}
-        className={`p-3 rounded-lg ${
-          timeOfDay === 'day' ? 'bg-white' : 'bg-gray-800'
-        } shadow-lg`}
-      >
-        <div className="flex items-center gap-2 mb-1">
-          <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-            devices.ac.isOn ? 'bg-cyan-100' : 'bg-gray-200'
-          }`}>
-            <Thermometer 
-              className={devices.ac.isOn ? 'text-cyan-500' : 'text-gray-400'} 
-              size={20}
+      {/* AC with better speed visualization */}
+<motion.div
+  animate={{
+    opacity: devices.ac.isOn ? 1 : 0.5
+  }}
+  className={`p-3 rounded-lg ${
+    timeOfDay === 'day' ? 'bg-white' : 'bg-gray-800'
+  } shadow-lg`}
+>
+  <div className="flex items-center gap-2 mb-2">
+    <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+      devices.ac.isOn 
+        ? (devices.ac.mode === 'cooling' ? 'bg-cyan-500' : 'bg-red-500')
+        : 'bg-gray-400'
+    }`}>
+      {devices.ac.mode === 'cooling' ? (
+        <Snowflake size={20} className="text-white" />
+      ) : devices.ac.mode === 'heating' ? (
+        <Flame size={20} className="text-white" />
+      ) : (
+        <Thermometer size={20} className="text-gray-600" />
+      )}
+    </div>
+    <div className="flex-1">
+      <p className={`text-xs font-semibold ${
+        timeOfDay === 'day' ? 'text-gray-700' : 'text-white'
+      }`}>
+        AC {devices.ac.mode === 'cooling' ? '❄️' : devices.ac.mode === 'heating' ? '🔥' : ''}
+      </p>
+      <p className={`text-xs ${
+        timeOfDay === 'day' ? 'text-gray-500' : 'text-gray-400'
+      }`}>
+        {devices.ac.isOn 
+          ? `${devices.ac.temperature}°C • Speed ${devices.ac.speed}/3` 
+          : 'Off'
+        }
+      </p>
+    </div>
+  </div>
+  
+  {/* Speed bars with labels */}
+  {devices.ac.isOn && (
+    <div className="space-y-1">
+      <div className="flex gap-1">
+        {[1, 2, 3].map((level) => (
+          <div key={level} className="flex-1 flex flex-col items-center gap-1">
+            <div
+              className={`w-full h-2 rounded-full transition-all ${
+                level <= devices.ac.speed 
+                  ? (devices.ac.mode === 'cooling' ? 'bg-cyan-500' : 'bg-red-500')
+                  : 'bg-gray-200'
+              }`}
             />
+            <span className="text-[8px] text-gray-500">{level}</span>
           </div>
-          <div>
-            <p className={`text-xs font-semibold ${
-              timeOfDay === 'day' ? 'text-gray-700' : 'text-white'
-            }`}>
-              AC
-            </p>
-            <p className={`text-xs ${
-              timeOfDay === 'day' ? 'text-gray-500' : 'text-gray-400'
-            }`}>
-              {devices.ac.isOn ? `${devices.ac.temperature}°C` : 'Off'}
-            </p>
-          </div>
-        </div>
-        {devices.ac.isOn && (
-          <div className="flex gap-1">
-            {[1, 2, 3].map((level) => (
-              <div
-                key={level}
-                className={`flex-1 h-1.5 rounded-full ${
-                  level <= devices.ac.speed ? 'bg-cyan-500' : 'bg-gray-200'
-                }`}
-              />
-            ))}
-          </div>
-        )}
-      </motion.div>
+        ))}
+      </div>
+      <p className="text-[10px] text-center text-gray-500 mt-1">
+        {devices.ac.powerConsumption}W
+      </p>
+    </div>
+  )}
+</motion.div>
+
     </div>
   );
 };
